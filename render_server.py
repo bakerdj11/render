@@ -1,3 +1,5 @@
+# render_server.py
+
 import os
 import time
 from flask import Flask, request, jsonify
@@ -27,26 +29,40 @@ def write_url_atomic(filepath, url):
     print(f"✅ Wrote {filepath}: {url} at {timestamp}")
 
 def read_url_with_check(filepath, max_age_seconds=300):
-    """Read URL and check if it's fresh (less than 5 minutes old)"""
+    """Read URL and check if it's fresh (backward compatible with old format)"""
     if not os.path.exists(filepath):
         return None, "File not found"
     
     try:
         with open(filepath, "r") as f:
-            lines = f.read().strip().split('\n')
-            if len(lines) < 2:
-                return None, "Invalid file format"
+            content = f.read().strip()
+            lines = content.split('\n')
             
-            url = lines[0]
-            timestamp = float(lines[1])
-            age = time.time() - timestamp
-            
-            if age > max_age_seconds:
-                print(f"⚠️ URL in {filepath} is {age:.1f}s old (stale)")
-                return None, f"URL too old ({age:.1f}s)"
-            
-            return url, None
+            if len(lines) == 1:
+                # Old format (just URL, no timestamp) - accept it but warn
+                url = lines[0]
+                print(f"⚠️ {filepath} using old format (no timestamp), accepting it")
+                return url, None
+            elif len(lines) >= 2:
+                # New format (URL + timestamp)
+                url = lines[0]
+                try:
+                    timestamp = float(lines[1])
+                    age = time.time() - timestamp
+                    
+                    if age > max_age_seconds:
+                        print(f"⚠️ URL in {filepath} is {age:.1f}s old (stale)")
+                        return None, f"URL too old ({age:.1f}s)"
+                    
+                    return url, None
+                except ValueError:
+                    # Couldn't parse timestamp, treat as old format
+                    print(f"⚠️ {filepath} has invalid timestamp, using URL anyway")
+                    return lines[0], None
+            else:
+                return None, "Empty file"
     except Exception as e:
+        print(f"❌ Error reading {filepath}: {e}")
         return None, str(e)
 
 @app.route('/')
